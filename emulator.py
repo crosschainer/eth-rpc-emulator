@@ -7,7 +7,7 @@ from eth_typing import HexStr
 from eth_utils import to_bytes
 from ethereum.transactions import Transaction
 import time
-
+from lamden.crypto.wallet import Wallet
 
 class CustomHandler(BaseHTTPRequestHandler):
     masternode_lamden = "https://masternode-01.lamden.io"
@@ -22,7 +22,7 @@ class CustomHandler(BaseHTTPRequestHandler):
         "0xf5fadd52b6a1a627005968d66e9289fb04844c8f": "ff61544ea94eaaeb5df08ed863c4a938e9129aba6ceee5f31b6681bdede11b89"
     }
 
-    def hex_to_bytes(data: str) -> bytes:
+    def hex_to_bytes(self, data: str) -> bytes:
         return to_bytes(hexstr=HexStr(data))
 
     def getLastBlockNumberAsHex(self):
@@ -62,12 +62,20 @@ class CustomHandler(BaseHTTPRequestHandler):
         except:
             nonce = 0
         return nonce
+    
+    def EcDsaSignatureToLamdenSignature(self, eth_tx, lamden_tx):
+        print(eth_tx)
+        print(lamden_tx)
+
+        #wallet = Wallet(sk)
+        #signature = wallet.sign(json.dumps(lamden_tx))
+        #return signature
+        return None
 
     def convertEthereumTransactionToLamden(self, tx):
         # we need to build tx from decoded eth tx
         lamden_tx = {}
         lamden_tx["metadata"] = {}
-        lamden_tx["metadata"]["signature"] = ""  # idk yet
         lamden_tx["metadata"]["timestamp"] = int(time.time())
 
         lamden_tx["payload"] = {}
@@ -75,13 +83,16 @@ class CustomHandler(BaseHTTPRequestHandler):
         lamden_tx["payload"]["function"] = "transfer"
 
         lamden_tx["payload"]["kwargs"] = {}
-        lamden_tx["payload"]["kwargs"]["amount"] = {"__fixed__": tx["value"]}
+        lamden_tx["payload"]["kwargs"]["amount"] = {"__fixed__": tx["value"] / pow(10, 18)}
         lamden_tx["payload"]["kwargs"]["to"] = self.eth_lamden_map[tx["to"]]
 
         lamden_tx["payload"]["nonce"] = self.getNonce(tx["sender"])
         lamden_tx["payload"]["processor"] = "89f67bb871351a1629d66676e4bd92bbacb23bd0649b890542ef98f1b664a497"
         lamden_tx["payload"]["sender"] = self.eth_lamden_map[tx["sender"]]
         lamden_tx["payload"]["stamps_supplied"] = 200  # use gas calc later
+
+        signature = self.EcDsaSignatureToLamdenSignature(tx, lamden_tx)
+        lamden_tx["metadata"]["signature"] = signature
 
         lamden_tx_json = (json.dumps(lamden_tx)).encode('utf-8')
 
@@ -150,11 +161,11 @@ class CustomHandler(BaseHTTPRequestHandler):
         if(data["method"] == "eth_getTransactionCount"):
             response_dict["jsonrpc"] = "2.0"
             response_dict["id"] = data["id"]
-            # Amount of TXs sent from this address
+            # Amount of TXs sent from this address = nonce, we dont need
             response_dict["result"] = "0x1"
         if(data["method"] == "eth_sendRawTransaction"):
             # decode tx
-            raw_tx = rlp.decode(hex_to_bytes(data["params"][0]), Transaction)
+            raw_tx = rlp.decode(self.hex_to_bytes(data["params"][0]), Transaction)
             tx = raw_tx.to_dict()
             lamden_tx = self.convertEthereumTransactionToLamden(tx)
             response_dict["jsonrpc"] = "2.0"
