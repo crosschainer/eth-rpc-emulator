@@ -8,6 +8,8 @@ from eth_utils import to_bytes
 from ethereum.transactions import Transaction
 import time
 from lamden.crypto.wallet import Wallet
+from lamden.crypto.transaction import build_transaction
+from contracting.db.encoder import decode
 
 class CustomHandler(BaseHTTPRequestHandler):
     masternode_lamden = "https://masternode-01.lamden.io"
@@ -15,11 +17,13 @@ class CustomHandler(BaseHTTPRequestHandler):
     # we need something better then these maps. some kind of converter that produces exact results
     # lamden seed phrase = ethereum seed phrase maybe possibru
     lamden_eth_map = {
-        "ff61544ea94eaaeb5df08ed863c4a938e9129aba6ceee5f31b6681bdede11b89": "0xf5fadd52b6a1a627005968d66e9289fb04844c8f"
+        "ff61544ea94eaaeb5df08ed863c4a938e9129aba6ceee5f31b6681bdede11b89": "0x70cbf2c569917993ead738e54894557b44dbff5e",
+        "80b5984b24261207ccb9b82b24a420a4f250f10f3a462abe1514afaa0e0eb376" : "0x7c569034fee3657461f27ef101d6460b24f9bad6"
     }
 
     eth_lamden_map = {
-        "0xf5fadd52b6a1a627005968d66e9289fb04844c8f": "ff61544ea94eaaeb5df08ed863c4a938e9129aba6ceee5f31b6681bdede11b89"
+        "0x70cbf2c569917993ead738e54894557b44dbff5e" : "ff61544ea94eaaeb5df08ed863c4a938e9129aba6ceee5f31b6681bdede11b89",
+        "0x7c569034fee3657461f27ef101d6460b24f9bad6" : "80b5984b24261207ccb9b82b24a420a4f250f10f3a462abe1514afaa0e0eb376"
     }
 
     def hex_to_bytes(self, data: str) -> bytes:
@@ -53,12 +57,11 @@ class CustomHandler(BaseHTTPRequestHandler):
             currency_balance = "0.00000000"
         return hex(int(decimal.Decimal(currency_balance)*pow(10, 18)))
 
-    def getNonce(self, eth_address):
+    def getNonce(self, lamden_address):
         try:
-            lamden_address = self.eth_lamden_map[eth_address]
             currency_balance_json = requests.get(self.masternode_lamden + "/nonce/" + lamden_address, headers={
                                                  'User-Agent': 'Mozilla/5.0 (X11; CrOS x86_64 12871.102.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/81.0.4044.141 Safari/537.36'}, timeout=2)
-            nonce = json.loads(currency_balance_json.text)["nonce"]
+            nonce = decode(currency_balance_json.text)
         except:
             nonce = 0
         return nonce
@@ -66,35 +69,61 @@ class CustomHandler(BaseHTTPRequestHandler):
     def EcDsaSignatureToLamdenSignature(self, eth_tx, lamden_tx):
         print(eth_tx)
         print(lamden_tx)
-
-        #wallet = Wallet(sk)
-        #signature = wallet.sign(json.dumps(lamden_tx))
-        #return signature
-        return None
+        transaction = {
+            'contract': lamden_tx["payload"]["contract"],
+            'function': lamden_tx["payload"]["function"],
+            'kwargs': lamden_tx["payload"]["kwargs"],
+            'sender': lamden_tx["payload"]["sender"],
+            'stamps_supplied': lamden_tx["payload"]["stamps_supplied"],
+            'nonce': lamden_tx["payload"]["nonce"],
+            'processor': lamden_tx["payload"]["processor"]
+        }
+        
+        #wallet = Wallet(seed = bytes.fromhex('PRIVKEY'))
+        signature = wallet.sign(json.dumps(transaction))
+        return signature
+        #return None
 
     def convertEthereumTransactionToLamden(self, tx):
         # we need to build tx from decoded eth tx
-        lamden_tx = {}
-        lamden_tx["metadata"] = {}
-        lamden_tx["metadata"]["timestamp"] = int(time.time())
+        #lamden_tx = {}
+        #lamden_tx["metadata"] = {}
+        #lamden_tx["metadata"]["timestamp"] = int(time.time())
 
-        lamden_tx["payload"] = {}
-        lamden_tx["payload"]["contract"] = "currency"
-        lamden_tx["payload"]["function"] = "transfer"
+        #lamden_tx["payload"] = {}
+        #lamden_tx["payload"]["contract"] = "currency"
+        #lamden_tx["payload"]["function"] = "transfer"
 
-        lamden_tx["payload"]["kwargs"] = {}
-        lamden_tx["payload"]["kwargs"]["amount"] = {"__fixed__": tx["value"] / pow(10, 18)}
-        lamden_tx["payload"]["kwargs"]["to"] = self.eth_lamden_map[tx["to"]]
+        #lamden_tx["payload"]["kwargs"] = {}
+        #lamden_tx["payload"]["kwargs"]["amount"] = {"__fixed__": str(tx["value"] / pow(10, 18))}
+        #lamden_tx["payload"]["kwargs"]["to"] = self.eth_lamden_map[tx["to"]]
 
-        lamden_tx["payload"]["nonce"] = self.getNonce(tx["sender"])
-        lamden_tx["payload"]["processor"] = "89f67bb871351a1629d66676e4bd92bbacb23bd0649b890542ef98f1b664a497"
-        lamden_tx["payload"]["sender"] = self.eth_lamden_map[tx["sender"]]
-        lamden_tx["payload"]["stamps_supplied"] = 200  # use gas calc later
+        #lamden_tx["payload"]["nonce"] = self.getNonce(tx["sender"])
+        #lamden_tx["payload"]["processor"] = "89f67bb871351a1629d66676e4bd92bbacb23bd0649b890542ef98f1b664a497"
+        #lamden_tx["payload"]["sender"] = self.eth_lamden_map[tx["sender"]]
+        #lamden_tx["payload"]["stamps_supplied"] = 200  # use gas calc later
 
-        signature = self.EcDsaSignatureToLamdenSignature(tx, lamden_tx)
-        lamden_tx["metadata"]["signature"] = signature
+        #signature = self.EcDsaSignatureToLamdenSignature(tx, lamden_tx)
+        #lamden_tx["metadata"]["signature"] = signature
 
-        lamden_tx_json = (json.dumps(lamden_tx)).encode('utf-8')
+        #lamden_tx_json = (json.dumps(lamden_tx))
+
+        wallet = Wallet(seed = bytes.fromhex('PRIVKEY HERE'))
+
+        tx_kwargs = {
+                "amount": decimal.Decimal(tx["value"] / pow(10, 18)),
+                "to" : self.eth_lamden_map[tx["to"]]
+            }
+
+        nonce = self.getNonce(self.eth_lamden_map[tx["sender"]])
+        lamden_tx_json = build_transaction(
+                wallet=wallet,
+                processor=nonce["processor"],
+                stamps=200,
+                nonce=nonce["nonce"],
+                contract='currency',
+                function='transfer',
+                kwargs=tx_kwargs)
 
         response_lamden = requests.post(
             self.masternode_lamden, data=lamden_tx_json, headers={
